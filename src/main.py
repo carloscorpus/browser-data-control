@@ -2,6 +2,7 @@ from core.config_loader import load_config
 from core.db_manager import DBManager
 from core.logger import setup_logging
 from core.chromium_cleaner import ChromiumCleaner
+from core.scheduler import TaskScheduler
 import os
 
 def main():
@@ -22,14 +23,23 @@ def main():
         system_user = os.getenv("USERNAME")
         logger.info(f"Usuario del sistema actual: {system_user}")
 
-        inactives = db.get_inactive_for_user(system_user)
+        def job():
+            inactives = db.get_inactive_for_user(system_user)
+            if inactives:
+                logger.info(f"⚠️ El usuario {system_user} está inactivo en la BD → ejecutar limpieza")
+                cleaner = ChromiumCleaner(logger, cfg)
+                cleaner.clean_profiles()
+            else:
+                logger.info(f"✅ El usuario {system_user} está activo/no registrado → no se limpia nada")
 
-        if inactives:
-            logger.info(f"⚠️ El usuario {system_user} está inactivo en la BD → ejecutar limpieza")
-            cleaner = ChromiumCleaner(logger, cfg)
-            cleaner.clean_profiles()
-        else:
-            logger.info(f"✅ El usuario {system_user} está activo o no está registrado → no se limpia nada")
+        sched = TaskScheduler(logger)
+        sched.add_cron_job(
+            job,
+            cfg.scheduler.cron.day_of_week,
+            cfg.scheduler.cron.hour,
+            cfg.scheduler.cron.minute
+        )
+        sched.start()
 
     except Exception as e:
         logger.error(f"❌ Error: {e}")
