@@ -10,13 +10,13 @@
   "scheduler": {
     "type": "cron",
     "cron": {
-      "day_of_week": "fri",
-      "hour": 14,
-      "minute": 0
+      "day_of_week": "*",
+      "hour": 13,
+      "minute": 26
     }
   },
   "cleaner": {
-    "mode": "files",
+    "mode": "profile",
     "files_to_remove": ["Login Data", "Cookies", "Web Data", "Local Storage"],
     "allow_permanent_delete": false,
     "quarantine_dir": "C:/browser-data-control/quarantine",
