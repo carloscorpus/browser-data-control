@@ -1,0 +1,32 @@
+{
+  "db": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "db_user",
+    "password_env_var": "DB_PASSWORD",
+    "database": "production_db",
+    "status_query": "SELECT id FROM practitioner_status WHERE status = 'I';"
+  },
+  "scheduler": {
+    "type": "cron",
+    "cron": {
+      "day_of_week": "fri",
+      "hour": 14,
+      "minute": 0
+    }
+  },
+  "cleaner": {
+    "mode": "files",
+    "files_to_remove": ["Login Data", "Cookies", "Web Data", "Local Storage"],
+    "allow_permanent_delete": false,
+    "quarantine_dir": "C:/browser-data-control/quarantine",
+    "browser_profiles": []
+  },
+  "logging": {
+    "level": "INFO",
+    "log_file": "logs/browser-data-control.log"
+  },
+  "safety": {
+    "dry_run": true
+  }
+}

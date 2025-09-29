@@ -1,6 +1,17 @@
+# Python
 __pycache__/
-.env
-/dist/
-/build/
-*.log
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Configs / secrets
 config/config.json
+.env
+
+# Logs
+logs/
+*.log
+
+# pyenv / virtualenv
+venv/
