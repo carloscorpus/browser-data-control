@@ -48,3 +48,24 @@ class DBManager:
                 return [(row["practitioner_id"], row["practitioner_status"]) for row in results]
         except Exception as e:
             raise DatabaseConnectionError(f"Error ejecutando query: {e}")
+
+    def get_inactive_for_user(self, system_username: str):
+        """
+        Retorna los practitioners inactivos asociados a un usuario específico del sistema.
+        """
+        query = """
+        SELECT p.practitioner_id, p.practitioner_status, u.system_username
+        FROM practitioners p
+        JOIN practitioner_system_users u
+          ON p.practitioner_id = u.practitioner_id
+        WHERE p.practitioner_status = 'I'
+          AND u.system_username = %s;
+        """
+        if not self.conn:
+            self.connect()
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(query, (system_username,))
+                return cursor.fetchall()
+        except Exception as e:
+            raise DatabaseConnectionError(f"Error ejecutando query: {e}")
