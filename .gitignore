@@ -15,3 +15,20 @@ logs/
 
 # pyenv / virtualenv
 venv/
+.venv/
+
+# Testing (agregar estas líneas)
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

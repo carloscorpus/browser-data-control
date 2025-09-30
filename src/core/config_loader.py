@@ -77,7 +77,7 @@ def load_config(path: str = None) -> AppConfig:
         raw = json.load(fh)
 
     try:
-        cfg = AppConfig.parse_obj(raw)
+        cfg = AppConfig.model_validate(raw)
     except ValidationError as ve:
         raise Exception(f"Error validando config.json: {ve}")
 
