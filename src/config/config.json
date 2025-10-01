@@ -11,8 +11,8 @@
     "type": "cron",
     "cron": {
       "day_of_week": "*",
-      "hour": 14,
-      "minute": 23
+      "hour": 16,
+      "minute": 7
     }
   },
   "cleaner": {

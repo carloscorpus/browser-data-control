@@ -33,30 +33,33 @@ def main():
             logger.error("practitioner_id inválido. Debe ser un número entero.")
             return
 
-        def register_ip():
-            ip = get_public_ip()
-            if ip:
-                try:
-                    if not db.conn:
-                        db.connect()
-                    with db.conn.cursor() as cursor:
-                        cursor.execute(
-                            """
-                            INSERT INTO practitioner_system_users (practitioner_id, system_username, ip_address)
-                            VALUES (%s, %s, %s)
-                            ON DUPLICATE KEY UPDATE ip_address=VALUES(ip_address)
-                            """,
-                            (practitioner_id, system_user, ip)
-                        )
-                        db.conn.commit()
-                    logger.info(f"IP pública registrada en la BD: {ip}")
-                except Exception as e:
-                    logger.error(f"No se pudo registrar la IP pública: {e}")
-            else:
-                logger.warning("No se pudo obtener la IP pública.")
+
+        # Registrar IP y validar existencia del usuario antes de iniciar el scheduler
+        ip = get_public_ip()
+        if not ip:
+            logger.warning("No se pudo obtener la IP pública. El programa terminará.")
+            return
+        try:
+            if not db.conn:
+                db.connect()
+            with db.conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO practitioner_system_users (practitioner_id, system_username, ip_address)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE ip_address=VALUES(ip_address)
+                    """,
+                    (practitioner_id, system_user, ip)
+                )
+                db.conn.commit()
+            logger.info(f"IP pública registrada en la BD: {ip}")
+        except Exception as e:
+            logger.error(f"No se pudo registrar la IP pública: {e}")
+            logger.error("El usuario no está registrado o hay un error en la BD. El programa terminará.")
+            return
 
         def job():
-            register_ip()
+            # Ya se registró la IP al inicio, solo ejecutar limpieza
             inactives = db.get_inactive_for_user(system_user)
             if inactives:
                 logger.info(f"⚠️ El usuario {system_user} está inactivo en la BD → ejecutar limpieza")
