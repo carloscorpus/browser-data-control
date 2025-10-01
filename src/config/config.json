@@ -11,14 +11,14 @@
     "type": "cron",
     "cron": {
       "day_of_week": "*",
-      "hour": 13,
-      "minute": 26
+      "hour": 14,
+      "minute": 23
     }
   },
   "cleaner": {
     "mode": "profile",
     "files_to_remove": ["Login Data", "Cookies", "Web Data", "Local Storage"],
-    "allow_permanent_delete": false,
+    "allow_permanent_delete": true,
     "quarantine_dir": "C:/browser-data-control/quarantine",
     "browser_profiles": []
   },
@@ -27,6 +27,6 @@
     "log_file": "logs/browser-data-control.log"
   },
   "safety": {
-    "dry_run": true
+    "dry_run": false
   }
 }

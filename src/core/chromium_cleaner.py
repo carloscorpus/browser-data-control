@@ -78,9 +78,14 @@ class ChromiumCleaner:
 
         try:
             if self.cfg.quarantine_dir:
+                import datetime
                 q_dir = Path(self.cfg.quarantine_dir)
                 q_dir.mkdir(parents=True, exist_ok=True)
-                dest = q_dir / path.name
+                dest_base = q_dir / path.name
+                dest = dest_base
+                if dest.exists():
+                    timestamp = datetime.datetime.now().strftime("_%Y%m%d_%H%M%S")
+                    dest = Path(f"{str(dest_base)}{timestamp}")
                 shutil.move(str(path), str(dest))
                 self.logger.info(f"Movido a cuarentena: {path} -> {dest}")
             else:
