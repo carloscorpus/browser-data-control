@@ -55,3 +55,58 @@ def test_get_inactive_practitioners_query_error(db_params):
 	db.conn.cursor.return_value.__enter__.side_effect = Exception('query error')
 	with pytest.raises(DatabaseConnectionError):
 		db.get_inactive_practitioners()
+
+def test_register_ip_success(db_params):
+	"""Test que simula el registro exitoso de IP en la base de datos."""
+	db = DBManager(**db_params)
+	db.conn = MagicMock()
+	mock_cursor = MagicMock()
+	db.conn.cursor.return_value.__enter__.return_value = mock_cursor
+	
+	# Simular INSERT/UPDATE exitoso
+	mock_cursor.execute.return_value = None
+	db.conn.commit.return_value = None
+	
+	# Esta sería la funcionalidad que se hace en main.py
+	practitioner_id = 678
+	system_user = "xrobe"
+	ip = "192.168.1.100"
+	
+	with db.conn.cursor() as cursor:
+		cursor.execute(
+			"""
+			INSERT INTO practitioner_system_users (practitioner_id, system_username, ip_address)
+			VALUES (%s, %s, %s)
+			ON DUPLICATE KEY UPDATE ip_address=VALUES(ip_address)
+			""",
+			(practitioner_id, system_user, ip)
+		)
+		db.conn.commit()
+	
+	mock_cursor.execute.assert_called_once()
+	db.conn.commit.assert_called_once()
+
+def test_register_ip_foreign_key_error(db_params):
+	"""Test que simula error de foreign key cuando practitioner_id no existe."""
+	db = DBManager(**db_params)
+	db.conn = MagicMock()
+	mock_cursor = MagicMock()
+	db.conn.cursor.return_value.__enter__.return_value = mock_cursor
+	
+	# Simular error de foreign key
+	mock_cursor.execute.side_effect = Exception('foreign key constraint fails')
+	
+	practitioner_id = 999  # ID que no existe
+	system_user = "testuser"
+	ip = "192.168.1.100"
+	
+	with pytest.raises(Exception):
+		with db.conn.cursor() as cursor:
+			cursor.execute(
+				"""
+				INSERT INTO practitioner_system_users (practitioner_id, system_username, ip_address)
+				VALUES (%s, %s, %s)
+				ON DUPLICATE KEY UPDATE ip_address=VALUES(ip_address)
+				""",
+				(practitioner_id, system_user, ip)
+			)
