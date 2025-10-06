@@ -52,23 +52,47 @@ class ChromiumCleaner:
 
         if not profiles:
             self.logger.warning("No se encontraron perfiles de Chromium para limpiar.")
-            return
+            return False
+
+        profiles_cleaned = 0
+        total_profiles = len(profiles)
 
         for profile in profiles:
-            if self.safety.dry_run:
-                self.logger.info(f"[DRY RUN] Se habría limpiado: {profile}")
-                continue
+            try:
+                if self.safety.dry_run:
+                    self.logger.info(f"[DRY RUN] Se habría limpiado: {profile}")
+                    profiles_cleaned += 1
+                    continue
 
-            if self.cfg.mode == "profile":
-                self._delete_or_quarantine(profile)
+                if self.cfg.mode == "profile":
+                    self._delete_or_quarantine(profile)
+                    profiles_cleaned += 1
 
-            elif self.cfg.mode == "files":
-                for file_name in self.cfg.files_to_remove:
-                    target = profile / "Default" / file_name
-                    if target.exists():
-                        self._delete_or_quarantine(target)
-                    else:
-                        self.logger.info(f"No se encontró: {target}")
+                elif self.cfg.mode == "files":
+                    files_cleaned = 0
+                    for file_name in self.cfg.files_to_remove:
+                        target = profile / "Default" / file_name
+                        if target.exists():
+                            self._delete_or_quarantine(target)
+                            files_cleaned += 1
+                        else:
+                            self.logger.info(f"No se encontró: {target}")
+                    
+                    if files_cleaned > 0:
+                        profiles_cleaned += 1
+
+            except Exception as e:
+                self.logger.error(f"Error limpiando perfil {profile}: {e}")
+                # Continuamos con el siguiente perfil en lugar de fallar completamente
+
+        # Retornar True si se limpió al menos un perfil exitosamente
+        success = profiles_cleaned > 0
+        if success:
+            self.logger.info(f"Limpieza completada: {profiles_cleaned}/{total_profiles} perfiles procesados")
+        else:
+            self.logger.error(f"No se pudo limpiar ningún perfil de {total_profiles} encontrados")
+        
+        return success
 
     def _delete_or_quarantine(self, path: Path):
         """Elimina o mueve un archivo/carpeta a cuarentena."""
