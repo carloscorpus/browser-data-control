@@ -87,6 +87,26 @@ El archivo `src/config/config.json` controla el comportamiento de la aplicación
     python src/main.py
     ```
 
+### Comandos administrativos
+
+El sistema incluye comandos administrativos para gestión manual:
+
+```bash
+# Consultar usuarios inhabilitados
+python src/main.py --consultar-inhabilitados
+
+# Limpiar datos de Chromium de un usuario específico
+python src/main.py --eliminar-un-usuario 123
+
+# Limpiar datos de Chromium de todos los usuarios inhabilitados
+python src/main.py --eliminar-varios-usuarios
+
+# Cambiar horario de ejecución automática
+python src/main.py --cambiar-hora-de-eliminacion --hour 20 --minute 0
+```
+
+**Nota importante**: Los comandos de "eliminación" **NO borran usuarios de la base de datos**, sino que **limpian sus datos de navegador** (perfiles, cookies, historial, etc.). Ver [COMANDOS_ADMINISTRATIVOS.md](COMANDOS_ADMINISTRATIVOS.md) para documentación completa.
+
 ---
 
 ## Pruebas automáticas (tests)
