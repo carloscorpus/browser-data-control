@@ -1,0 +1,14 @@
+# Dependencias para la aplicación de administración
+# Reutiliza las dependencias existentes del proyecto principal
+
+# Base requirements (from main project)
+-r ../requirements.txt
+
+# Additional dependencies for admin GUI
+tkinter-tooltip==2.1.0
+Pillow==10.0.0
+PyInstaller==5.13.2
+
+# For exe generation and distribution
+pyinstaller-hooks-contrib==2023.7
+auto-py-to-exe==2.40.0
