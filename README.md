@@ -1,175 +1,267 @@
 # Browser Data Control
 
-Automatiza la limpieza de perfiles y datos sensibles de Chromium/Chrome en Windows, con soporte para tareas programadas y respaldo en cuarentena.
+Sistema administrativo profesional para el control y limpieza automatizada de datos de navegador Chromium/Chrome. Incluye interfaz gráfica de administración, gestión de usuarios con base de datos MySQL, y generación de EXE personalizados.
+
+## ✨ **Características Principales**
+
+-   🖥️ **Interfaz Administrativa Profesional** - GUI moderna con Tkinter para gestión completa
+-   🔐 **Sistema de Autenticación** - Login seguro con validación de credenciales en base de datos
+-   👥 **Gestión de Usuarios** - Visualización, búsqueda y administración de practitioners
+-   📦 **Generación de EXE Personalizados** - Creación de ejecutables específicos por usuario
+-   📅 **Fechas Automáticas** - Lectura automática de fechas de fin de convenio desde BD
+-   🔍 **Validación en Tiempo Real** - Verificación inmediata de IDs y estados de usuario
+-   🗄️ **Integración MySQL** - Conexión directa con base de datos de producción
+-   🧹 **Limpieza Automatizada** - Limpieza programada de datos de navegador Chromium/Chrome
 
 ---
 
-## Requisitos previos
+## 📋 **Requisitos del Sistema**
 
--   Python 3.8+
--   Windows
--   Tener instalado Chromium/Chrome (para limpieza de perfiles)
--   (Opcional) MySQL si quieres usar la funcionalidad de base de datos
+-   **Sistema Operativo:** Windows 10/11
+-   **Python:** 3.13+ (recomendado)
+-   **Base de Datos:** MySQL Server
+-   **Navegador:** Chromium/Chrome instalado
+-   **Dependencias:** Ver `requirements.txt`
 
-## Instalación y setup del entorno
+---
 
-1. Clona el repositorio y entra a la carpeta del proyecto.
-2. Crea y activa el entorno virtual:
-    ```bash
-    python -m venv .venv
-    source .venv/Scripts/activate
-    ```
-3. Instala las dependencias:
-    ```bash
-    pip install -r requirements.txt
-    ```
+## ⚙️ **Instalación y Configuración**
 
-## Configuración del archivo `config.json`
+### 1. **Configuración del Entorno**
 
-El archivo `src/config/config.json` controla el comportamiento de la aplicación. A continuación se describen sus secciones y opciones principales:
+```bash
+# Clonar repositorio
+git clone [repo-url]
+cd browser-data-control
 
-### Estructura y opciones
+# Crear entorno virtual
+python -m venv .venv
+.venv\Scripts\activate
+
+# Instalar dependencias
+pip install -r requirements.txt
+```
+
+### 2. **Configuración de Base de Datos**
+
+Editar `src/config/config.json`:
 
 ```json
 {
 	"db": {
-		"host": "", // Dirección del servidor de base de datos MySQL
-		"port": , // Puerto de conexión
-		"user": "", // Usuario de la base de datos
-		"password": "", // Contraseña del usuario
-		"database": "", // Nombre de la base de datos
-		"status_query": "" // Consulta SQL para obtener practitioners inactivos
-	},
-	"scheduler": {
-		"type": "cron", // Tipo de programación (por ahora solo 'cron')
-		"cron": {
-			"day_of_week": "*", // Días de la semana para ejecutar (ej: "mon", "tue", "*")
-			"hour": 13, // Hora de ejecución (0-23)
-			"minute": 26 // Minuto de ejecución (0-59)
-		}
-	},
-	"cleaner": {
-		"mode": "profile", // "profile" para borrar el perfil completo, "files" para borrar archivos específicos
-		"files_to_remove": ["Login Data", "Cookies", "Web Data", "Local Storage"], // Archivos a eliminar si el modo es "files"
-		"allow_permanent_delete": false, // Si es true, borra permanentemente; si es false, mueve a cuarentena
-		"quarantine_dir": "C:/browser-data-control/quarantine", // Carpeta donde se moverán los archivos en cuarentena
-		"browser_profiles": [] // Rutas adicionales de perfiles de Chromium a limpiar (opcional)
-	},
-	"logging": {
-		"level": "INFO", // Nivel de logs: "DEBUG", "INFO", "WARNING", "ERROR"
-		"log_file": "logs/browser-data-control.log" // Ruta del archivo de logs
-	},
-	"safety": {
-		"dry_run": true // Si es true, solo simula la limpieza (no borra nada realmente)
+		"host": "sql.freedb.tech",
+		"port": 3306,
+		"user": "tu_usuario",
+		"password": "tu_contraseña",
+		"database": "tu_base_datos"
 	}
 }
 ```
 
-### Notas importantes
+### 3. **Estructura de Base de Datos Requerida**
 
--   **dry_run**: Si está en `true`, la limpieza solo se simula. Para borrar realmente, ponlo en `false`.
--   **mode**:
-    -   `"profile"` borra todo el perfil de usuario de Chromium.
-    -   `"files"` solo borra los archivos listados en `files_to_remove`.
--   **quarantine_dir**: Si `allow_permanent_delete` es `false`, los archivos se moverán aquí en vez de borrarse.
--   **browser_profiles**: Puedes agregar rutas personalizadas de perfiles Chromium si no quieres usar solo las rutas por defecto.
+```sql
+-- Tabla practitioners (requerida)
+CREATE TABLE practitioners (
+    practitioner_id INT PRIMARY KEY,
+    practitioner_status CHAR(1), -- 'A' = Activo, 'I' = Inactivo
+    practitioner_date_end DATE   -- Fecha fin de convenio (campo virtual generado)
+);
+
+-- Tabla admin_users (para login)
+CREATE TABLE admin_users (
+    username VARCHAR(50) PRIMARY KEY,
+    password_hash VARCHAR(255),
+    is_active BOOLEAN DEFAULT TRUE
+);
+```
 
 ---
 
-## Ejecución del script principal
+## 🚀 **Uso de la Aplicación**
 
-1. Activa el entorno virtual:
-    ```bash
-    source .venv/Scripts/activate
-    ```
-2. Ejecuta el script (se quedará corriendo):
-    ```bash
-    python src/main.py
-    ```
-
-### Comandos administrativos
-
-El sistema incluye comandos administrativos para gestión manual:
+### **Ejecutar Interfaz Administrativa**
 
 ```bash
-# Consultar usuarios inhabilitados
+# Activar entorno
+.venv\Scripts\activate
+
+# Ejecutar aplicación admin
+python admin_app/main.py
+```
+
+### **Flujo de Trabajo Principal**
+
+1. **🔑 Login Administrativo**
+
+    - Ingresar credenciales de administrador
+    - Validación automática con base de datos
+
+2. **👥 Gestión de Usuarios**
+
+    - Ver lista completa de practitioners
+    - Buscar por ID, nombre o estado
+    - Visualizar detalles completos de usuario
+    - Ejecutar limpieza manual por usuario
+
+3. **📦 Generación de EXE**
+    - Ingresar ID de practitioner objetivo
+    - Validar usuario con botón "🔍 Validar"
+    - Verificar fecha de fin de convenio automática
+    - Validar configuración completa
+    - Generar EXE personalizado
+
+### **Controles Principales**
+
+-   **🔍 Validar:** Verifica ID de usuario y muestra información
+-   **🔍 Validar Configuración:** Confirma que todos los datos son correctos
+-   **🚀 Generar EXE Personalizado:** Crea ejecutable específico para el usuario
+-   **🧹 Limpiar Usuario:** Ejecuta limpieza inmediata de datos del navegador
+
+---
+
+## 🛠️ **Configuración Avanzada**
+
+### **Modos de Limpieza**
+
+-   **`profile`:** Elimina perfil completo de usuario
+-   **`files`:** Elimina archivos específicos (cookies, historial, etc.)
+
+### **Opciones de Seguridad**
+
+```json
+{
+	"safety": {
+		"dry_run": false, // true = simulación, false = ejecución real
+		"allow_permanent_delete": false, // true = borrado permanente
+		"quarantine_dir": "C:/browser-data-control/quarantine"
+	}
+}
+```
+
+### **Archivos de Limpieza Específica**
+
+```json
+{
+	"cleaner": {
+		"files_to_remove": [
+			"Login Data", // Contraseñas guardadas
+			"Cookies", // Cookies de sitios web
+			"Web Data", // Datos de formularios
+			"Local Storage", // Almacenamiento local
+			"History" // Historial de navegación
+		]
+	}
+}
+```
+
+---
+
+## 🔧 **Línea de Comandos (Legacy)**
+
+> **Nota:** La interfaz gráfica es la forma recomendada de usar el sistema. Los comandos CLI siguen disponibles para automatización.
+
+```bash
+# Consultar usuarios inactivos
 python src/main.py --consultar-inhabilitados
 
-# Limpiar datos de Chromium de un usuario específico
+# Limpiar usuario específico
 python src/main.py --eliminar-un-usuario 123
 
-# Limpiar datos de Chromium de todos los usuarios inhabilitados
+# Limpiar todos los usuarios inactivos
 python src/main.py --eliminar-varios-usuarios
 
-# Cambiar horario de ejecución automática
+# Cambiar horario de limpieza automática
 python src/main.py --cambiar-hora-de-eliminacion --hour 20 --minute 0
 ```
 
-**Nota importante**: Los comandos de "eliminación" **NO borran usuarios de la base de datos**, sino que **limpian sus datos de navegador** (perfiles, cookies, historial, etc.). Ver [COMANDOS_ADMINISTRATIVOS.md](COMANDOS_ADMINISTRATIVOS.md) para documentación completa.
+---
+
+## 🧪 **Testing y Calidad**
+
+### **Ejecutar Tests Automáticos**
+
+```bash
+# Tests completos
+pytest -v
+
+# Tests específicos por módulo
+pytest tests/test_db_manager.py -v
+pytest tests/test_cleaner.py -v
+pytest tests/test_scheduler.py -v
+```
+
+### **Cobertura de Testing**
+
+-   ✅ Conexión y operaciones de base de datos
+-   ✅ Limpieza de perfiles Chromium
+-   ✅ Validación de usuarios y fechas
+-   ✅ Sistema de programación de tareas
+-   ✅ Manejo de errores y excepciones
 
 ---
 
-## Pruebas automáticas (tests)
+## 📊 **Estructura del Proyecto**
 
-El proyecto incluye tests automáticos para asegurar la funcionalidad y robustez del código.
-
-### ¿Cómo ejecutar los tests?
-
-1. Activa el entorno virtual:
-    ```bash
-    source .venv/Scripts/activate
-    ```
-2. Ejecuta todos los tests con:
-    ```bash
-    pytest -v
-    ```
-    - El parámetro `-v` muestra el detalle de cada test.
-    - Si todo está correcto, verás que todos los tests pasan (`PASSED`).
-
-### ¿Qué cubren los tests?
-
--   Conexión y manejo de errores de la base de datos.
--   Limpieza de perfiles y archivos de Chromium.
--   Programación y ejecución de tareas automáticas.
--   Validación de la configuración y logging.
-
-### ¿Qué hacer si agregas nuevas funciones?
-
--   Crea un nuevo archivo de test en la carpeta `tests/` o agrega funciones a los existentes.
--   Usa el patrón `test_*.py` y funciones que comiencen con `test_`.
--   Ejecuta `pytest -v` para verificar que todo sigue funcionando.
-
-**Consejo:** Ejecuta los tests antes y después de hacer cambios importantes para asegurarte de que no se rompe nada.
+```
+browser-data-control/
+├── admin_app/                 # Interfaz administrativa (GUI)
+│   ├── main.py               # Punto de entrada de la aplicación
+│   ├── src/
+│   │   ├── ui/
+│   │   │   ├── login_window.py    # Ventana de login
+│   │   │   └── main_window.py     # Interfaz principal
+│   │   └── services/
+│   │       ├── db_service.py      # Servicios de base de datos
+│   │       └── user_service.py    # Gestión de usuarios
+├── src/                      # Core del sistema (CLI)
+│   ├── main.py              # Script principal CLI
+│   ├── config/              # Archivos de configuración
+│   └── core/                # Módulos principales
+├── tests/                   # Tests automáticos
+└── logs/                    # Archivos de log
+```
 
 ---
 
-## Pruebas manuales de limpieza de Chromium
+## 🚨 **Notas Importantes de Seguridad**
 
-Puedes probar la funcionalidad de limpieza de perfiles Chromium siguiendo estos pasos:
-
-1. Configura el archivo `config.json`
-    - Asegúrate de que la sección `cleaner` tenga:
-        - `"mode": "profile"` para borrar el perfil completo, o `"files"` para borrar archivos específicos.
-        - `"dry_run": false` en la sección `safety` para que la limpieza sea real (si solo quieres simular, déjalo en `true`).
-        - `"quarantine_dir"` debe existir o ser una ruta válida si no quieres borrar permanentemente.
-2. Cierra todas las ventanas de Chromium/Chrome
-    - El script intentará cerrarlas, pero es mejor cerrarlas manualmente para evitar conflictos.
-3. Ejecuta el script principal
-    ```bash
-    python src/main.py
-    ```
-    - Observa los logs en consola y en el archivo de logs para ver el resultado de la limpieza.
-4. Verifica la carpeta de cuarentena
-    - Si usas cuarentena, revisa que los perfiles o archivos hayan sido movidos correctamente a la ruta indicada.
-5. Repite la prueba cambiando parámetros
-    - Puedes cambiar `mode`, `files_to_remove`, o activar/desactivar `dry_run` para probar diferentes escenarios.
-
-**Nota:** Si ves errores de "Destination path ... already exists", elimina manualmente la carpeta de cuarentena correspondiente antes de volver a ejecutar la prueba, o pide ayuda para automatizar el manejo de duplicados.
+-   ⚠️ **Respaldos:** Siempre hacer backup antes de limpiezas masivas
+-   🔒 **Credenciales:** No compartir credenciales de base de datos
+-   🛡️ **Permisos:** Ejecutar con permisos administrativos cuando sea necesario
+-   📝 **Logs:** Revisar logs regularmente para detectar anomalías
+-   🔍 **Validación:** Siempre validar IDs antes de ejecutar limpiezas
 
 ---
 
-## Notas y recomendaciones
+## 📈 **Próximas Funcionalidades**
 
--   Revisa los logs para cualquier advertencia o error.
--   Haz respaldos antes de limpiar perfiles reales.
--   Si tienes dudas sobre la configuración, revisa la sección correspondiente arriba.
+-   🔄 **Sistema Heartbeat:** Validación automática en tiempo real
+-   🏗️ **PyInstaller:** Generación real de ejecutables standalone
+-   📊 **Dashboard:** Métricas y estadísticas de uso
+-   🔔 **Notificaciones:** Alertas automáticas de eventos importantes
+
+---
+
+## 🆘 **Soporte y Mantenimiento**
+
+### **Logs del Sistema**
+
+-   **Ubicación:** `logs/browser-data-control.log`
+-   **Nivel:** INFO, DEBUG, WARNING, ERROR
+-   **Rotación:** Automática por tamaño
+
+### **Resolución de Problemas Comunes**
+
+| Problema              | Causa                      | Solución                    |
+| --------------------- | -------------------------- | --------------------------- |
+| Error de conexión DB  | Credenciales incorrectas   | Verificar `config.json`     |
+| Usuario no encontrado | ID inexistente             | Validar ID en base de datos |
+| Error de permisos     | Falta acceso administrador | Ejecutar como administrador |
+| Chromium en uso       | Navegador abierto          | Cerrar todas las ventanas   |
+
+### **Contacto**
+
+-   **Desarrollador:** [Nombre del desarrollador]
+-   **Repositorio:** [URL del repositorio]
+-   **Documentación:** Ver archivos `/docs` para detalles técnicos
