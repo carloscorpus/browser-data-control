@@ -19,6 +19,7 @@ except ImportError as e:
     print(f"📍 Buscando en: {src_path}")
     raise
 from typing import Optional, Tuple, List, Dict
+from datetime import datetime
 
 class SecureDBService:
     """
@@ -83,24 +84,39 @@ class SecureDBService:
             raise DatabaseConnectionError("No hay conexión a la base de datos")
         
         try:
+            # Asegurar conexión viva y sesión con lecturas frescas
+            try:
+                self.db_manager.conn.ping(reconnect=True)
+                # Forzar autocommit en conexiones existentes
+                try:
+                    self.db_manager.conn.autocommit(True)
+                except Exception:
+                    pass
+                # Cerrar cualquier transacción previa para evitar snapshots antiguos
+                try:
+                    self.db_manager.conn.rollback()
+                except Exception:
+                    pass
+                with self.db_manager.conn.cursor() as _c:
+                    _c.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            except Exception:
+                pass
+
             cursor = self.db_manager.conn.cursor()
-            
-            # Query para obtener usuarios inactivos (adaptada a tu BD real)
-            query = """
-            SELECT p.practitioner_id, p.general_id, p.practitioner_status, 
-                   p.practitioner_date_start, p.practitioner_date_end,
-                   p.practitioner_observation, p.area_id, p.division_id,
-                   psu.system_username, psu.ip_address
-            FROM practitioners p
-            LEFT JOIN practitioner_system_users psu ON p.practitioner_id = psu.practitioner_id
-            WHERE p.practitioner_status = 'I'
-            ORDER BY p.practitioner_id
-            """
-            
+
+            # Evitar duplicados: no hacer JOIN que multiplique filas por usuario del sistema.
+            query = (
+                "SELECT practitioner_id, general_id, practitioner_status, "
+                "       practitioner_date_start, practitioner_date_end, "
+                "       practitioner_observation, area_id, division_id "
+                "FROM practitioners WHERE practitioner_status = 'I' "
+                "ORDER BY practitioner_id"
+            )
+
             cursor.execute(query)
             results = cursor.fetchall()
             cursor.close()
-            
+
             return results
             
         except Exception as e:
@@ -125,6 +141,24 @@ class SecureDBService:
             raise DatabaseConnectionError("No hay conexión a la base de datos")
         
         try:
+            # Asegurar conexión viva y sesión con lecturas frescas
+            try:
+                self.db_manager.conn.ping(reconnect=True)
+                # Forzar autocommit en conexiones existentes
+                try:
+                    self.db_manager.conn.autocommit(True)
+                except Exception:
+                    pass
+                # Cerrar cualquier transacción previa para evitar snapshots antiguos
+                try:
+                    self.db_manager.conn.rollback()
+                except Exception:
+                    pass
+                with self.db_manager.conn.cursor() as _c:
+                    _c.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            except Exception:
+                pass
+
             cursor = self.db_manager.conn.cursor()
             
             query = """
@@ -153,3 +187,185 @@ class SecureDBService:
             self.db_manager.close()
             self.db_manager = None
             self.connection_params = None
+
+    def get_practitioner_by_id(self, practitioner_id: int) -> Optional[Dict]:
+        """
+        Obtiene un practicante específico por ID para refrescar únicamente esa fila en UI.
+        """
+        if not self.db_manager:
+            raise DatabaseConnectionError("No hay conexión a la base de datos")
+
+        try:
+            # Asegurar conexión viva y sesión con lecturas frescas
+            try:
+                self.db_manager.conn.ping(reconnect=True)
+                try:
+                    self.db_manager.conn.autocommit(True)
+                except Exception:
+                    pass
+                try:
+                    self.db_manager.conn.rollback()
+                except Exception:
+                    pass
+                with self.db_manager.conn.cursor() as _c:
+                    _c.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            except Exception:
+                pass
+
+            query = (
+                "SELECT practitioner_id, general_id, practitioner_status, "
+                "       practitioner_date_start, practitioner_date_end, "
+                "       practitioner_observation, area_id, division_id "
+                "FROM practitioners WHERE practitioner_id = %s LIMIT 1"
+            )
+            with self.db_manager.conn.cursor() as cursor:
+                cursor.execute(query, (int(practitioner_id),))
+                row = cursor.fetchone()
+                return row if row else None
+        except Exception as e:
+            print(f"Error getting practitioner by id: {e}")
+            raise
+
+    def get_practitioners_by_ids(self, practitioner_ids: List[int]) -> List[Dict]:
+        """
+        Obtiene múltiples practicantes por ID de forma eficiente.
+        """
+        if not practitioner_ids:
+            return []
+        if not self.db_manager:
+            raise DatabaseConnectionError("No hay conexión a la base de datos")
+
+        try:
+            # Asegurar conexión viva y sesión con lecturas frescas
+            try:
+                self.db_manager.conn.ping(reconnect=True)
+                try:
+                    self.db_manager.conn.autocommit(True)
+                except Exception:
+                    pass
+                try:
+                    self.db_manager.conn.rollback()
+                except Exception:
+                    pass
+                with self.db_manager.conn.cursor() as _c:
+                    _c.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            except Exception:
+                pass
+
+            ids_placeholders = ",".join(["%s"] * len(practitioner_ids))
+            query = (
+                "SELECT practitioner_id, general_id, practitioner_status, "
+                "       practitioner_date_start, practitioner_date_end, "
+                "       practitioner_observation, area_id, division_id "
+                f"FROM practitioners WHERE practitioner_id IN ({ids_placeholders})"
+            )
+            with self.db_manager.conn.cursor() as cursor:
+                cursor.execute(query, tuple(int(i) for i in practitioner_ids))
+                return cursor.fetchall()
+        except Exception as e:
+            print(f"Error getting practitioners by ids: {e}")
+            raise
+
+    def get_practitioner_signatures(self) -> List[Dict]:
+        """
+        Retorna una vista ligera para detectar cambios sin updated_at.
+        Incluye columnas clave cuya modificación debe reflejarse en la UI.
+        """
+        if not self.db_manager:
+            raise DatabaseConnectionError("No hay conexión a la base de datos")
+        try:
+            try:
+                self.db_manager.conn.ping(reconnect=True)
+                try:
+                    self.db_manager.conn.autocommit(True)
+                except Exception:
+                    pass
+                try:
+                    self.db_manager.conn.rollback()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            query = (
+                "SELECT practitioner_id, general_id, practitioner_status, "
+                "       practitioner_date_start, practitioner_date_end "
+                "FROM practitioners ORDER BY practitioner_id"
+            )
+            with self.db_manager.conn.cursor() as cursor:
+                cursor.execute(query)
+                return cursor.fetchall()
+        except Exception as e:
+            print(f"Error getting practitioner signatures: {e}")
+            raise
+
+    def get_new_practitioners_since_id(self, last_id: int) -> List[Dict]:
+        """
+        Obtiene nuevos practicantes con ID mayor a last_id (maneja altas nuevas).
+        Nota: Solo detecta nuevas altas si practitioner_id es incremental.
+        """
+        if not self.db_manager:
+            raise DatabaseConnectionError("No hay conexión a la base de datos")
+        try:
+            try:
+                self.db_manager.conn.ping(reconnect=True)
+                try:
+                    self.db_manager.conn.autocommit(True)
+                except Exception:
+                    pass
+                try:
+                    self.db_manager.conn.rollback()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            query = (
+                "SELECT practitioner_id, general_id, practitioner_status, "
+                "       practitioner_date_start, practitioner_date_end, "
+                "       practitioner_observation, area_id, division_id "
+                "FROM practitioners WHERE practitioner_id > %s ORDER BY practitioner_id"
+            )
+            with self.db_manager.conn.cursor() as cursor:
+                cursor.execute(query, (int(last_id),))
+                return cursor.fetchall()
+        except Exception as e:
+            print(f"Error getting new practitioners: {e}")
+            raise
+
+    def get_updated_practitioners_since_ts(self, last_sync: datetime) -> Optional[List[Dict]]:
+        """
+        Obtiene practicantes actualizados desde last_sync usando columna updated_at.
+        Si la columna no existe, retorna None para indicar que no es soportado.
+        """
+        if not self.db_manager:
+            raise DatabaseConnectionError("No hay conexión a la base de datos")
+        try:
+            try:
+                self.db_manager.conn.ping(reconnect=True)
+                try:
+                    self.db_manager.conn.autocommit(True)
+                except Exception:
+                    pass
+                try:
+                    self.db_manager.conn.rollback()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            query = (
+                "SELECT practitioner_id, general_id, practitioner_status, "
+                "       practitioner_date_start, practitioner_date_end, "
+                "       practitioner_observation, area_id, division_id, updated_at "
+                "FROM practitioners WHERE updated_at > %s"
+            )
+            with self.db_manager.conn.cursor() as cursor:
+                cursor.execute(query, (last_sync,))
+                return cursor.fetchall()
+        except Exception as e:
+            # Si falla por columna desconocida, devolver None para fallback
+            if "unknown column" in str(e).lower() or "updated_at" in str(e).lower():
+                return None
+            print(f"Error getting updated practitioners: {e}")
+            raise

@@ -22,8 +22,16 @@ class DBManager:
                 password=self.password,
                 database=self.database,
                 charset="utf8mb4",
-                cursorclass=pymysql.cursors.DictCursor
+                cursorclass=pymysql.cursors.DictCursor,
+                autocommit=True
             )
+            # Intentar bajar el aislamiento para lecturas más frescas
+            try:
+                with self.conn.cursor() as cursor:
+                    cursor.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            except Exception:
+                # Si no se puede cambiar el nivel, continuar con autocommit
+                pass
         except Exception as e:
             raise DatabaseConnectionError(f"Error al conectar a la BD: {e}")
 

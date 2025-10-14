@@ -30,6 +30,9 @@ class MainWindow:
         self.selected_practitioner = None
         self.selected_end_date = None  # Fecha de fin de convenio del usuario seleccionado
         self.validated_exe_user = None  # Usuario validado para generación EXE
+        self.last_full_sync_ts = None   # Timestamp del último full refresh
+        self.max_seen_id = 0            # Máximo practitioner_id visto para altas incrementales
+        self.showing_inactives = False  # Estado actual del filtro de inactivos
         
         # Setup UI
         self.setup_ui()
@@ -114,17 +117,26 @@ class MainWindow:
         
         refresh_btn = ttk.Button(
             toolbar_frame,
-            text="🔄 Actualizar",
-            command=self.refresh_practitioners
+            text="🔄 Actualizar (inteligente)",
+            command=self.smart_refresh
         )
         refresh_btn.pack(side='left', padx=(0, 5))
         
-        inactive_btn = ttk.Button(
+        refresh_one_btn = ttk.Button(
             toolbar_frame,
-            text="⚠️ Solo Inactivos",
-            command=self.show_inactive_only
+            text="🔁 Actualizar seleccionado",
+            command=self.refresh_selected_practitioner
         )
-        inactive_btn.pack(side='left')
+        refresh_one_btn.pack(side='left', padx=(0, 5))
+
+        # Botón incremental se sustituye por el inteligente; si quieres, podemos ocultarlo
+
+        self.toggle_inactive_btn = ttk.Button(
+            toolbar_frame,
+            text="⚠️ Mostrar Inactivos",
+            command=self.toggle_inactives
+        )
+        self.toggle_inactive_btn.pack(side='left')
         
         # Treeview para usuarios
         columns = ('ID', 'General ID', 'Estado', 'Fecha Inicio', 'Fecha Fin', 'Observación')
@@ -372,6 +384,7 @@ class MainWindow:
                 self.users_tree.delete(item)
             
             # Agregar usuarios al treeview
+            max_id = self.max_seen_id
             for practitioner in practitioners:
                 status_text = "✅ Activo" if practitioner.get('practitioner_status') == 'A' else "❌ Inactivo"
                 
@@ -391,15 +404,365 @@ class MainWindow:
                     fecha_fin,
                     practitioner.get('practitioner_observation', 'Sin observaciones')[:50] + ('...' if len(str(practitioner.get('practitioner_observation', ''))) > 50 else '')
                 ))
+                try:
+                    pid = int(practitioner.get('practitioner_id'))
+                    if pid > max_id:
+                        max_id = pid
+                except Exception:
+                    pass
             
             # YA NO necesitamos combo de usuarios - usamos entrada de texto con validación
             # El campo Practitioner ID es ahora un Entry, no un Combobox
             
+            # Guardar marcadores de sincronización
+            from datetime import datetime
+            self.last_full_sync_ts = datetime.now()
+            self.max_seen_id = max_id
+
             self.status_var.set(f"✅ {len(practitioners)} usuarios cargados")
             
         except Exception as e:
             self.status_var.set("❌ Error actualizando usuarios")
             messagebox.showerror("Error", f"No se pudo actualizar la lista de usuarios:\n{e}")
+
+    def refresh_selected_practitioner(self):
+        """Refresca únicamente la fila del usuario seleccionado"""
+        selection = self.users_tree.selection()
+        if not selection:
+            messagebox.showinfo("Información", "Seleccione un usuario en la tabla para actualizar solo esa fila.")
+            return
+
+        item_id = selection[0]
+        values = self.users_tree.item(item_id, 'values')
+        if not values:
+            return
+
+        try:
+            pid = int(values[0])
+        except Exception:
+            pid = values[0]
+
+        try:
+            self.status_var.set(f"🔁 Actualizando usuario {pid}...")
+            data = self.db_service.get_practitioner_by_id(pid)
+            if not data:
+                messagebox.showwarning("No encontrado", f"El usuario {pid} ya no existe en la BD")
+                # Eliminar la fila si ya no existe
+                self.users_tree.delete(item_id)
+                self.status_var.set(f"⚠️ Usuario {pid} eliminado de la lista")
+                return
+
+            status_text = "✅ Activo" if data.get('practitioner_status') == 'A' else "❌ Inactivo"
+            fecha_inicio = str(data.get('practitioner_date_start', '')) if data.get('practitioner_date_start') else ''
+            fecha_fin = str(data.get('practitioner_date_end', '')) if data.get('practitioner_date_end') else ''
+            observacion = data.get('practitioner_observation', 'Sin observaciones')
+            if observacion is None:
+                observacion = 'Sin observaciones'
+            obs_short = str(observacion)[:50] + ('...' if len(str(observacion)) > 50 else '')
+
+            # Actualizar los valores de la fila seleccionada
+            self.users_tree.item(item_id, values=(
+                data.get('practitioner_id'),
+                data.get('general_id', 'N/A'),
+                status_text,
+                fecha_inicio,
+                fecha_fin,
+                obs_short
+            ))
+
+            # También sincronizar el cache en memoria
+            updated = False
+            for idx, p in enumerate(self.practitioners_data):
+                try:
+                    cached_id = int(p.get('practitioner_id'))
+                except Exception:
+                    cached_id = p.get('practitioner_id')
+                if cached_id == pid:
+                    self.practitioners_data[idx] = data
+                    updated = True
+                    break
+            if not updated:
+                self.practitioners_data.append(data)
+
+            self.status_var.set(f"✅ Usuario {pid} actualizado")
+        except Exception as e:
+            self.status_var.set("❌ Error actualizando usuario")
+            messagebox.showerror("Error", f"No se pudo actualizar el usuario {pid}:\n{e}")
+
+    def incremental_refresh(self):
+        """Realiza una actualización incremental: añade nuevos IDs y actualiza filas cambiadas.
+        Requiere columna updated_at para detectar actualizaciones; si no existe, solo añade nuevos.
+        """
+        try:
+            added = 0
+            updated = 0
+
+            # 1) Nuevos registros por ID mayor al visto
+            try:
+                new_rows = self.db_service.get_new_practitioners_since_id(self.max_seen_id)
+            except Exception as e:
+                new_rows = []
+                print(f"DEBUG INCR: error nuevos: {e}")
+
+            for data in new_rows:
+                status_text = "✅ Activo" if data.get('practitioner_status') == 'A' else "❌ Inactivo"
+                fecha_inicio = str(data.get('practitioner_date_start', '')) if data.get('practitioner_date_start') else ''
+                fecha_fin = str(data.get('practitioner_date_end', '')) if data.get('practitioner_date_end') else ''
+                observacion = data.get('practitioner_observation', 'Sin observaciones')
+                if observacion is None:
+                    observacion = 'Sin observaciones'
+                obs_short = str(observacion)[:50] + ('...' if len(str(observacion)) > 50 else '')
+
+                # Evitar insertar duplicado si ya existe en la tabla
+                existing_item = None
+                for itm in self.users_tree.get_children():
+                    vals = self.users_tree.item(itm, 'values')
+                    if vals and str(vals[0]) == str(data.get('practitioner_id')):
+                        existing_item = itm
+                        break
+                if existing_item:
+                    self.users_tree.item(existing_item, values=(
+                        data.get('practitioner_id'),
+                        data.get('general_id', 'N/A'),
+                        status_text,
+                        fecha_inicio,
+                        fecha_fin,
+                        obs_short
+                    ))
+                else:
+                    self.users_tree.insert('', 'end', values=(
+                        data.get('practitioner_id'),
+                        data.get('general_id', 'N/A'),
+                        status_text,
+                        fecha_inicio,
+                        fecha_fin,
+                        obs_short
+                    ))
+
+                # Actualizar caches
+                self.practitioners_data.append(data)
+                try:
+                    pid = int(data.get('practitioner_id'))
+                    if pid > self.max_seen_id:
+                        self.max_seen_id = pid
+                except Exception:
+                    pass
+                added += 1
+
+            # 2) Actualizaciones por updated_at si está disponible
+            updated_rows = []
+            if self.last_full_sync_ts:
+                try:
+                    updated_rows = self.db_service.get_updated_practitioners_since_ts(self.last_full_sync_ts) or []
+                except Exception as e:
+                    updated_rows = []
+                    print(f"DEBUG INCR: error updated_at: {e}")
+
+            # Mapear filas actuales por ID para actualizar la UI
+            if updated_rows:
+                # Construir índice de items: pid -> item_id
+                id_to_item = {}
+                for item in self.users_tree.get_children():
+                    vals = self.users_tree.item(item, 'values')
+                    if vals:
+                        try:
+                            pid = int(vals[0])
+                        except Exception:
+                            pid = vals[0]
+                        id_to_item[pid] = item
+
+                for data in updated_rows:
+                    try:
+                        pid = int(data.get('practitioner_id'))
+                    except Exception:
+                        pid = data.get('practitioner_id')
+                    item_id = id_to_item.get(pid)
+                    if not item_id:
+                        continue  # si no está en la tabla (alta nueva), ya lo cubre el paso 1
+
+                    status_text = "✅ Activo" if data.get('practitioner_status') == 'A' else "❌ Inactivo"
+                    fecha_inicio = str(data.get('practitioner_date_start', '')) if data.get('practitioner_date_start') else ''
+                    fecha_fin = str(data.get('practitioner_date_end', '')) if data.get('practitioner_date_end') else ''
+                    observacion = data.get('practitioner_observation', 'Sin observaciones')
+                    if observacion is None:
+                        observacion = 'Sin observaciones'
+                    obs_short = str(observacion)[:50] + ('...' if len(str(observacion)) > 50 else '')
+
+                    self.users_tree.item(item_id, values=(
+                        data.get('practitioner_id'),
+                        data.get('general_id', 'N/A'),
+                        status_text,
+                        fecha_inicio,
+                        fecha_fin,
+                        obs_short
+                    ))
+
+                    # Sync cache
+                    for idx, p in enumerate(self.practitioners_data):
+                        try:
+                            cached_id = int(p.get('practitioner_id'))
+                        except Exception:
+                            cached_id = p.get('practitioner_id')
+                        if cached_id == pid:
+                            self.practitioners_data[idx] = data
+                            updated += 1
+                            break
+
+            # Actualizar marcador de sync
+            from datetime import datetime
+            self.last_full_sync_ts = datetime.now()
+
+            self.status_var.set(f"⚡ Incremental: +{added} nuevos, {updated} actualizados")
+        except Exception as e:
+            self.status_var.set("❌ Error en actualización incremental")
+            messagebox.showerror("Error", f"No se pudo completar la actualización incremental:\n{e}")
+
+    def smart_refresh(self):
+        """Refresca de forma inteligente: actualiza solo filas nuevas o modificadas, sin full reload.
+        No requiere columnas adicionales en la BD.
+        """
+        try:
+            self.status_var.set("🔄 Analizando cambios...")
+            self.root.update_idletasks()
+
+            # 1) Obtener firmas ligeras desde BD
+            signatures = self.db_service.get_practitioner_signatures()
+
+            # 2) Construir índices de UI y cache
+            id_to_item = {}
+            for item in self.users_tree.get_children():
+                vals = self.users_tree.item(item, 'values')
+                if vals:
+                    try:
+                        pid = int(vals[0])
+                    except Exception:
+                        pid = vals[0]
+                    id_to_item[pid] = item
+
+            cache_index = {}
+            for p in self.practitioners_data:
+                try:
+                    pid = int(p.get('practitioner_id'))
+                except Exception:
+                    pid = p.get('practitioner_id')
+                cache_index[pid] = p
+
+            added = 0
+            updated = 0
+
+            # 3) Recorrer firmas para detectar altas/cambios
+            for sig in signatures:
+                try:
+                    pid = int(sig.get('practitioner_id'))
+                except Exception:
+                    pid = sig.get('practitioner_id')
+
+                item_id = id_to_item.get(pid)
+                cached = cache_index.get(pid)
+
+                # Calcular firma cache actual
+                def to_signature(d):
+                    if not d:
+                        return None
+                    return (
+                        d.get('general_id'),
+                        d.get('practitioner_status'),
+                        str(d.get('practitioner_date_start')) if d.get('practitioner_date_start') else '',
+                        str(d.get('practitioner_date_end')) if d.get('practitioner_date_end') else ''
+                    )
+
+                sig_new = to_signature(sig)
+                sig_old = to_signature(cached)
+
+                if item_id is None:
+                    # Alta nueva: pedir fila completa y añadir
+                    data = self.db_service.get_practitioner_by_id(pid)
+                    if not data:
+                        continue
+                    status_text = "✅ Activo" if data.get('practitioner_status') == 'A' else "❌ Inactivo"
+                    fecha_inicio = str(data.get('practitioner_date_start', '')) if data.get('practitioner_date_start') else ''
+                    fecha_fin = str(data.get('practitioner_date_end', '')) if data.get('practitioner_date_end') else ''
+                    observacion = data.get('practitioner_observation', 'Sin observaciones')
+                    if observacion is None:
+                        observacion = 'Sin observaciones'
+                    obs_short = str(observacion)[:50] + ('...' if len(str(observacion)) > 50 else '')
+
+                    # Evitar insertar duplicado si ya existe en la tabla
+                    existing_item = None
+                    for itm in self.users_tree.get_children():
+                        vals = self.users_tree.item(itm, 'values')
+                        if vals and str(vals[0]) == str(data.get('practitioner_id')):
+                            existing_item = itm
+                            break
+                    if existing_item:
+                        self.users_tree.item(existing_item, values=(
+                            data.get('practitioner_id'),
+                            data.get('general_id', 'N/A'),
+                            status_text,
+                            fecha_inicio,
+                            fecha_fin,
+                            obs_short
+                        ))
+                    else:
+                        self.users_tree.insert('', 'end', values=(
+                            data.get('practitioner_id'),
+                            data.get('general_id', 'N/A'),
+                            status_text,
+                            fecha_inicio,
+                            fecha_fin,
+                            obs_short
+                        ))
+                    self.practitioners_data.append(data)
+                    try:
+                        pid_int = int(data.get('practitioner_id'))
+                        if pid_int > self.max_seen_id:
+                            self.max_seen_id = pid_int
+                    except Exception:
+                        pass
+                    added += 1
+                else:
+                    # Existe en UI: si la firma cambió, refrescar esa fila
+                    if sig_new != sig_old:
+                        data = self.db_service.get_practitioner_by_id(pid)
+                        if not data:
+                            # Si ya no existe, eliminar fila
+                            self.users_tree.delete(item_id)
+                            continue
+                        status_text = "✅ Activo" if data.get('practitioner_status') == 'A' else "❌ Inactivo"
+                        fecha_inicio = str(data.get('practitioner_date_start', '')) if data.get('practitioner_date_start') else ''
+                        fecha_fin = str(data.get('practitioner_date_end', '')) if data.get('practitioner_date_end') else ''
+                        observacion = data.get('practitioner_observation', 'Sin observaciones')
+                        if observacion is None:
+                            observacion = 'Sin observaciones'
+                        obs_short = str(observacion)[:50] + ('...' if len(str(observacion)) > 50 else '')
+
+                        self.users_tree.item(item_id, values=(
+                            data.get('practitioner_id'),
+                            data.get('general_id', 'N/A'),
+                            status_text,
+                            fecha_inicio,
+                            fecha_fin,
+                            obs_short
+                        ))
+                        # Sync cache
+                        cache_index[pid] = data
+                        for idx, p in enumerate(self.practitioners_data):
+                            try:
+                                cached_id = int(p.get('practitioner_id'))
+                            except Exception:
+                                cached_id = p.get('practitioner_id')
+                            if cached_id == pid:
+                                self.practitioners_data[idx] = data
+                                break
+                        updated += 1
+
+            # 4) Actualizar marcadores y estado
+            from datetime import datetime
+            self.last_full_sync_ts = datetime.now()
+            self.status_var.set(f"✅ Actualización inteligente: +{added} nuevos, {updated} modificados")
+        except Exception as e:
+            self.status_var.set("❌ Error en actualización inteligente")
+            messagebox.showerror("Error", f"No se pudo completar la actualización:\n{e}")
     
     def show_inactive_only(self):
         """Muestra solo usuarios inactivos"""
@@ -425,9 +788,51 @@ class MainWindow:
                 ))
             
             self.status_var.set(f"⚠️ Mostrando {len(inactive_users)} usuarios inactivos")
+            self.showing_inactives = True
+            self.toggle_inactive_btn.config(text="👁️ Mostrar Todo")
             
         except Exception as e:
             messagebox.showerror("Error", f"No se pudieron cargar usuarios inactivos:\n{e}")
+
+    def toggle_inactives(self):
+        """Alterna entre mostrar solo inactivos y mostrar todos desde cache."""
+        if not self.showing_inactives:
+            # Pasar a solo inactivos (consulta puntual)
+            self.show_inactive_only()
+        else:
+            # Volver a mostrar todo desde cache (sin consultar toda la BD)
+            try:
+                # Limpiar treeview
+                for item in self.users_tree.get_children():
+                    self.users_tree.delete(item)
+
+                # Repintar desde cache existente
+                count = 0
+                for practitioner in self.practitioners_data:
+                    status_text = "✅ Activo" if practitioner.get('practitioner_status') == 'A' else "❌ Inactivo"
+                    fecha_inicio = practitioner.get('practitioner_date_start', '')
+                    fecha_fin = practitioner.get('practitioner_date_end', '')
+                    if fecha_inicio:
+                        fecha_inicio = str(fecha_inicio)
+                    if fecha_fin:
+                        fecha_fin = str(fecha_fin)
+
+                    self.users_tree.insert('', 'end', values=(
+                        practitioner.get('practitioner_id'),
+                        practitioner.get('general_id', 'N/A'),
+                        status_text,
+                        fecha_inicio,
+                        fecha_fin,
+                        practitioner.get('practitioner_observation', 'Sin observaciones')[:50] + ('...' if len(str(practitioner.get('practitioner_observation', ''))) > 50 else '')
+                    ))
+                    count += 1
+
+                self.status_var.set(f"✅ Mostrando todos ({count}) desde caché")
+                self.showing_inactives = False
+                self.toggle_inactive_btn.config(text="⚠️ Mostrar Inactivos")
+            except Exception as e:
+                self.status_var.set("❌ Error mostrando todos desde caché")
+                messagebox.showerror("Error", f"No se pudo restaurar la vista completa:\n{e}")
     
     def on_user_select(self, event):
         """Maneja la selección de usuario"""
@@ -443,7 +848,11 @@ class MainWindow:
                 fecha_inicio = values[3]
                 fecha_fin = values[4]
                 
-                self.selected_practitioner = user_id
+                # Asegurar tipo consistente (int) para comparaciones posteriores
+                try:
+                    self.selected_practitioner = int(user_id)
+                except Exception:
+                    self.selected_practitioner = user_id
                 
                 # Mostrar información completa del usuario
                 status_emoji = "✅" if "Activo" in user_status_text else "❌"
@@ -465,7 +874,11 @@ class MainWindow:
             # Buscar el usuario en la lista actual
             user_data = None
             for practitioner in self.practitioners_data:
-                if practitioner.get('practitioner_id') == self.selected_practitioner:
+                try:
+                    pid = int(practitioner.get('practitioner_id'))
+                except Exception:
+                    pid = practitioner.get('practitioner_id')
+                if pid == self.selected_practitioner:
                     user_data = practitioner
                     break
             
