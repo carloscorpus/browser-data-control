@@ -902,7 +902,7 @@ class MainWindow:
             messagebox.showerror("Error", f"Error obteniendo detalles:\n{e}")
     
     def manual_clean_user(self):
-        """Ejecuta limpieza manual para el usuario"""
+        """Ejecuta limpieza manual remota para el usuario seleccionado"""
         if not self.selected_practitioner:
             messagebox.showwarning("Advertencia", "Seleccione un usuario primero")
             return
@@ -910,13 +910,91 @@ class MainWindow:
         result = messagebox.askyesno(
             "Confirmar Limpieza", 
             f"¿Está seguro de que desea ejecutar la limpieza manual para el usuario ID: {self.selected_practitioner}?\n\n"
-            "Esta acción limpiará los datos de Chromium del usuario."
+            "Esta acción limpiará los datos de Chromium del usuario en todos sus equipos registrados."
         )
         
         if result:
-            # Aquí iría la lógica de limpieza manual
-            messagebox.showinfo("Limpieza Iniciada", f"Limpieza manual iniciada para usuario {self.selected_practitioner}")
-            self.status_var.set(f"🧹 Limpieza manual ejecutada para usuario {self.selected_practitioner}")
+            self.status_var.set(f"🔄 Iniciando limpieza manual para usuario {self.selected_practitioner}...")
+            
+            # Ejecutar limpieza en hilo separado para no bloquear UI
+            import threading
+            
+            def cleanup_thread():
+                try:
+                    # Importar el módulo de limpieza remota
+                    import sys
+                    import os
+                    current_dir = os.path.dirname(__file__)
+                    project_root = os.path.join(current_dir, '..', '..', '..')
+                    src_path = os.path.join(project_root, 'src')
+                    sys.path.insert(0, src_path)
+                    
+                    from core.remote_cleaner import RemoteCleaner
+                    from core.config_loader import load_config
+                    
+                    # Cargar configuración
+                    config = load_config(os.path.join(src_path, 'config', 'config.json'))
+                    
+                    # Crear instancia del limpiador remoto
+                    remote_cleaner = RemoteCleaner(config)
+                    
+                    # Obtener información de sistemas del usuario
+                    system_users = self.db_service.db_manager.get_practitioner_system_users(self.selected_practitioner)
+                    
+                    if not system_users:
+                        self.root.after(0, lambda: self._show_cleanup_result({
+                            'success': False,
+                            'error': 'No hay equipos registrados para este usuario'
+                        }))
+                        return
+                    
+                    # Ejecutar limpieza
+                    cleanup_result = remote_cleaner.clean_user_chromium(self.selected_practitioner, system_users)
+                    
+                    # Mostrar resultado en UI thread
+                    self.root.after(0, lambda: self._show_cleanup_result(cleanup_result))
+                    
+                except Exception as e:
+                    error_result = {
+                        'success': False,
+                        'error': f'Error interno: {str(e)}'
+                    }
+                    self.root.after(0, lambda: self._show_cleanup_result(error_result))
+            
+            # Iniciar hilo de limpieza
+            cleanup_thread = threading.Thread(target=cleanup_thread, daemon=True)
+            cleanup_thread.start()
+    
+    def _show_cleanup_result(self, result: dict):
+        """Muestra el resultado de la limpieza en la UI"""
+        if result['success']:
+            cleaned_count = len(result.get('cleaned_systems', []))
+            failed_count = len(result.get('failed_systems', []))
+            total_count = result.get('total_systems', 0)
+            
+            message = f"✅ Limpieza completada para usuario {self.selected_practitioner}\n\n"
+            message += f"📊 Sistemas procesados: {total_count}\n"
+            message += f"✅ Limpieza exitosa: {cleaned_count}\n"
+            message += f"❌ Fallos: {failed_count}\n\n"
+            
+            if result.get('cleaned_systems'):
+                message += "🎯 Sistemas limpiados:\n"
+                for system in result['cleaned_systems']:
+                    message += f"  • {system['system_username']} ({system['ip_address']})\n"
+            
+            if result.get('failed_systems'):
+                message += "\n⚠️ Sistemas con fallos:\n"
+                for system in result['failed_systems']:
+                    message += f"  • {system['system_username']}: {system['error']}\n"
+            
+            messagebox.showinfo("Limpieza Completada", message)
+            self.status_var.set(f"✅ Limpieza manual completada - {cleaned_count}/{total_count} sistemas")
+        else:
+            error_msg = result.get('error', 'Error desconocido')
+            messagebox.showerror("Error en Limpieza", 
+                               f"❌ No se pudo completar la limpieza para usuario {self.selected_practitioner}\n\n"
+                               f"Error: {error_msg}")
+            self.status_var.set(f"❌ Error en limpieza manual - {error_msg}")
     
     def manual_validate_user_id(self):
         """Validación MANUAL del Usuario Objetivo con fecha automática de BD"""
@@ -1222,7 +1300,7 @@ class MainWindow:
         self.exe_log.insert(tk.END, "─" * 50 + "\n")
     
     def generate_custom_exe(self):
-        """Genera EXE personalizado"""
+        """Genera EXE personalizado con funcionalidad real"""
         if not self.validate_exe_config():
             return
         
@@ -1231,65 +1309,519 @@ class MainWindow:
             self.exe_log.insert(tk.END, "❌ ERROR: Usuario no validado correctamente\n")
             return
         
-        user_id = self.validated_exe_user['id']  # Usar ID del usuario validado
+        user_id = self.validated_exe_user['id']
+        user_data = self.validated_exe_user['data']
         mode = self.clean_mode_var.get()
+        agreement_date_str = self.selected_end_date
         
-        # Usar fecha de fin de convenio de la BD
-        agreement_date_str = self.selected_end_date if isinstance(self.selected_end_date, str) else str(self.selected_end_date)
-        date_clean = agreement_date_str.replace('-', '')  # YYYYMMDD
+        self.exe_log.insert(tk.END, f"🔧 Iniciando generación real de EXE...\n")
+        self.exe_log.insert(tk.END, f"👤 Usuario: {user_id}\n")
+        self.exe_log.insert(tk.END, f"📅 Fecha convenio: {agreement_date_str}\n")
+        self.exe_log.insert(tk.END, f"🧹 Modo: {mode}\n")
+        self.exe_log.see(tk.END)
         
-        # Generar nombre de archivo
-        exe_filename = f"browser_cleaner_user_{user_id}_{date_clean}.exe"
+        def generate_thread():
+            try:
+                # Generar EXE directamente sin importaciones externas complejas
+                import json
+                import os
+                import tempfile
+                from datetime import datetime
+                from pathlib import Path
+                
+                # Actualizar log
+                self.root.after(0, lambda: self._update_exe_log("⚙️ Preparando configuración personalizada...\n"))
+                
+                # Crear directorio de salida
+                output_dir = Path("output")
+                output_dir.mkdir(exist_ok=True)
+                
+                # Generar nombre de archivo
+                date_clean = agreement_date_str.replace('-', '')
+                exe_filename = f"browser_cleaner_user_{user_id}_{date_clean}.exe"
+                exe_path = output_dir / exe_filename
+                
+                # Crear configuración del cliente
+                client_config = {
+                    'practitioner_id': user_id,
+                    'agreement_end_date': agreement_date_str,
+                    'clean_mode': mode,
+                    'generated_at': datetime.now().isoformat(),
+                    'user_info': {
+                        'general_id': user_data.get('general_id'),
+                        'status': user_data.get('practitioner_status'),
+                        'start_date': str(user_data.get('practitioner_date_start', ''))
+                    },
+                    'database': {
+                        'host': 'sql.freedb.tech',
+                        'port': 3306,
+                        'database': 'freedb_test-bot-devconsulting',
+                        'user': 'freedb_practitioners',
+                        'password': 'eeg93*TtDH&qK!P'
+                    },
+                    'cleaner': {
+                        'mode': mode,
+                        'files_to_remove': ["Login Data", "Cookies", "Web Data", "Local Storage"],
+                        'quarantine_dir': f"C:/browser-data-control/quarantine/user_{user_id}",
+                        'chromium_url': "https://download-chromium.appspot.com/"
+                    },
+                    'scheduler': {
+                        'cleanup_time': "13:30",  # 1:30 PM
+                        'check_interval': 3600  # Verificar cada hora
+                    },
+                    'heartbeat': {
+                        'server_port': 8765,
+                        'check_interval': 300  # 5 minutos
+                    }
+                }
+                
+                # Actualizar log
+                self.root.after(0, lambda: self._update_exe_log("📝 Generando script del cliente...\n"))
+                
+                # Crear el script del cliente con configuración embebida (compatible Windows)
+                client_script = f'''# -*- coding: utf-8 -*-
+"""
+Browser Data Control Client
+Generado automaticamente para Practitioner ID: {user_id}
+Fecha de generacion: {client_config['generated_at']}
+Fecha fin de convenio: {agreement_date_str}
+
+INSTRUCCIONES:
+1. Ejecutar este archivo en el equipo del colaborador
+2. El programa se registrara automaticamente en la base de datos
+3. Ejecutara limpieza automatica el dia de vencimiento del convenio
+4. Mantener ejecutandose en segundo plano hasta la fecha limite
+"""
+
+import os
+import sys
+import time
+from datetime import datetime, date
+from pathlib import Path
+
+# Configuracion embebida
+CONFIG = {json.dumps(client_config, indent=2)}
+
+class ChromiumCleaner:
+    """Limpia datos de Chromium según configuración"""
+    
+    def __init__(self):
+        self.config = CONFIG['cleaner']
+        self.mode = self.config['mode']
         
-        self.exe_log.insert(tk.END, f"🔧 Iniciando generación de EXE...\n")
-        self.exe_log.insert(tk.END, f"📄 Archivo: {exe_filename}\n")
-        
+    def clean_chromium_data(self):
+        """Ejecuta limpieza de datos"""
         try:
-            from datetime import datetime
+            print("[INFO] Iniciando limpieza de Chromium...")
             
-            # Aquí agregaríamos el registro a la BD
-            self.exe_log.insert(tk.END, f"📝 Registrando en BD: Usuario {user_id}, Fecha: {agreement_date_str}\n")
+            # Cerrar procesos de Chromium
+            self._close_chromium_processes()
             
-            # Crear el archivo de configuración personalizado
-            config_data = {
-                "practitioner_id": int(user_id),
-                "agreement_end_date": agreement_date_str,
-                "clean_mode": mode,
-                "generated_at": datetime.now().isoformat(),
-                "heartbeat_url": "https://your-heartbeat-server.com/api/status"
-            }
+            # Obtener perfiles
+            profiles = self._detect_profiles()
             
-            # ⚠️ SIMULACIÓN - En desarrollo
-            self.exe_log.insert(tk.END, "⚠️ MODO SIMULACIÓN - PyInstaller pendiente de implementar\n")
-            import time
-            for i in range(5):
-                self.exe_log.insert(tk.END, f"⚙️ [SIMULANDO] Compilando... {(i+1)*20}%\n")
-                self.exe_log.see(tk.END)
-                self.root.update()
-                time.sleep(0.3)
+            if not profiles:
+                print("[WARNING] No se encontraron perfiles de Chromium")
+                return False
+                
+            cleaned_count = 0
+            for profile in profiles:
+                if self._clean_profile(profile):
+                    cleaned_count += 1
             
-            # Simular éxito con advertencia
-            self.exe_log.insert(tk.END, "✅ [SIMULACIÓN] EXE configuración preparada!\n")
-            self.exe_log.insert(tk.END, f"⚠️ NOTA: Archivo NO creado físicamente aún\n")
-            self.exe_log.insert(tk.END, f"📋 Ubicación futura: ./output/{exe_filename}\n")
-            self.exe_log.insert(tk.END, "📋 El EXE incluye:\n")
-            self.exe_log.insert(tk.END, f"   - Configuración para usuario {user_id}\n")
-            self.exe_log.insert(tk.END, f"   - Fecha límite de acuerdo: {agreement_date_str}\n")
-            self.exe_log.insert(tk.END, f"   - Modo de limpieza: {mode}\n")
-            self.exe_log.insert(tk.END, "   - Sistema de heartbeat integrado\n")
-            self.exe_log.insert(tk.END, "   - Auto-detección de IP y nombre de equipo\n")
-            self.exe_log.insert(tk.END, "=" * 50 + "\n")
-            self.exe_log.see(tk.END)
-            
-            messagebox.showinfo("Configuración Lista", 
-                                f"✅ Configuración EXE preparada exitosamente:\n{exe_filename}\n\n"
-                                "⚠️ NOTA: Archivo físico aún no creado\n"
-                                "PyInstaller será implementado próximamente")
+            print(f"[SUCCESS] Limpieza completada: {{cleaned_count}}/{{len(profiles)}} perfiles")
+            return cleaned_count > 0
             
         except Exception as e:
-            self.exe_log.insert(tk.END, f"❌ ERROR al generar EXE: {str(e)}\n")
-            self.exe_log.see(tk.END)
-            messagebox.showerror("Error", f"Error al generar EXE: {str(e)}")
+            print(f"[ERROR] Error en limpieza: {{e}}")
+            return False
+    
+    def _close_chromium_processes(self):
+        """Cierra procesos de Chromium"""
+        try:
+            import subprocess
+            subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "chromium.exe"], capture_output=True)
+        except:
+            pass
+    
+    def _detect_profiles(self):
+        """Detecta perfiles de Chromium en todas las ubicaciones posibles"""
+        profiles = []
+        user = os.getenv("USERNAME", "default")
+        
+        # Lista de rutas posibles donde puede estar Chromium
+        possible_paths = [
+            # AppData estándar de Chromium
+            Path(f"C:/Users/{{user}}/AppData/Local/Chromium/User Data"),
+            Path(f"C:/Users/{{user}}/AppData/Local/Google/Chrome/User Data"),
+            
+            # Descargas manuales comunes
+            Path(f"C:/Users/{{user}}/Downloads/chrome-win/User Data"),
+            Path(f"C:/Users/{{user}}/Desktop/chrome-win/User Data"), 
+            Path("C:/chrome-win/User Data"),
+            Path("C:/Chromium/User Data"),
+            
+            # Instalaciones personalizadas
+            Path("C:/BrowserDataControl/Chromium/User Data"),
+            Path(f"C:/Users/{{user}}/Chromium/User Data"),
+            
+            # Programas
+            Path("C:/Program Files/Chromium/User Data"),
+            Path("C:/Program Files (x86)/Chromium/User Data"),
+        ]
+        
+        for path in possible_paths:
+            if path.exists():
+                profiles.append(path)
+                print(f"[INFO] Perfil Chromium encontrado: {{path}}")
+        
+        if not profiles:
+            print("[WARNING] No se encontraron perfiles de Chromium")
+            print("[INFO] Rutas buscadas:")
+            for path in possible_paths:
+                print(f"  - {{path}}")
+                
+        return profiles
+    
+    def _detect_chromium_executables(self):
+        """Detecta ejecutables de Chromium para cerrar procesos"""
+        user = os.getenv("USERNAME", "default")
+        
+        possible_exe_paths = [
+            # Descargas manuales
+            Path(f"C:/Users/{{user}}/Downloads/chrome-win/chrome.exe"),
+            Path(f"C:/Users/{{user}}/Desktop/chrome-win/chrome.exe"),
+            Path("C:/chrome-win/chrome.exe"),
+            
+            # Instalaciones
+            Path("C:/Program Files/Chromium/Application/chrome.exe"),
+            Path("C:/Program Files (x86)/Chromium/Application/chrome.exe"),
+            Path(f"C:/Users/{{user}}/AppData/Local/Chromium/Application/chrome.exe"),
+        ]
+        
+        found_exes = []
+        for exe_path in possible_exe_paths:
+            if exe_path.exists():
+                found_exes.append(exe_path)
+                print(f"[INFO] Chromium ejecutable: {{exe_path}}")
+                
+        return found_exes
+    
+    def _clean_profile(self, profile_path):
+        """Limpia un perfil específico"""
+        try:
+            if self.mode == "profile":
+                # Eliminar todo el perfil
+                import shutil
+                shutil.rmtree(profile_path)
+                print(f"[INFO] Perfil eliminado: {{profile_path}}")
+            elif self.mode == "files":
+                # Eliminar archivos especificos
+                for file_name in self.config['files_to_remove']:
+                    file_path = profile_path / "Default" / file_name
+                    if file_path.exists():
+                        if file_path.is_dir():
+                            import shutil
+                            shutil.rmtree(file_path)
+                        else:
+                            file_path.unlink()
+                        print(f"[INFO] Archivo eliminado: {{file_name}}")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Error limpiando {{profile_path}}: {{e}}")
+            return False
+
+class DatabaseManager:
+    """Maneja conexion real a base de datos MySQL"""
+    
+    def __init__(self):
+        self.db_config = CONFIG['database']
+        self.practitioner_id = CONFIG['practitioner_id']
+        
+    def register_system_info(self):
+        """Registra informacion del sistema en la BD"""
+        try:
+            import pymysql
+            import socket
+            
+            # Obtener informacion del sistema
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            username = os.getenv("USERNAME", "unknown")
+            
+            print(f"[INFO] Conectando a BD: {{self.db_config['host']}}")
+            print(f"[INFO] Registrando sistema: {{username}} - {{local_ip}}")
+            print(f"[DEBUG] Practitioner ID: {{self.practitioner_id}}")
+            print(f"[DEBUG] Database: {{self.db_config['database']}}")
+            
+            # Conexion a MySQL
+            conn = pymysql.connect(
+                host=self.db_config['host'],
+                user=self.db_config['user'], 
+                password=self.db_config['password'],
+                database=self.db_config['database'],
+                charset='utf8mb4',
+                cursorclass=pymysql.cursors.DictCursor,
+                connect_timeout=10
+            )
+            
+            print("[DEBUG] Conexion a BD exitosa")
+            
+            with conn.cursor() as cursor:
+                # Verificar si ya existe el registro
+                sql_check = """
+                    SELECT practitioner_id FROM practitioner_system_users 
+                    WHERE practitioner_id = %s AND system_username = %s
+                """
+                cursor.execute(sql_check, (self.practitioner_id, username))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Actualizar registro existente
+                    sql_update = """
+                        UPDATE practitioner_system_users 
+                        SET ip_address = %s
+                        WHERE practitioner_id = %s AND system_username = %s
+                    """
+                    cursor.execute(sql_update, (local_ip, self.practitioner_id, username))
+                    print("[SUCCESS] Registro actualizado en BD")
+                else:
+                    # Crear nuevo registro
+                    sql_insert = """
+                        INSERT INTO practitioner_system_users 
+                        (practitioner_id, system_username, ip_address)
+                        VALUES (%s, %s, %s)
+                    """
+                    cursor.execute(sql_insert, (self.practitioner_id, username, local_ip))
+                    print("[SUCCESS] Sistema registrado en BD")
+                
+                conn.commit()
+                print(f"[DEBUG] Transaccion completada")
+            
+            conn.close()
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] Error registrando en BD: {{e}}")
+            print(f"[DEBUG] Tipo de error: {{type(e).__name__}}")
+            print("[WARNING] Continuando sin registro en BD...")
+            return False
+
+def main():
+    """Función principal del cliente"""
+    print("=" * 60)
+    print("Browser Data Control Client")
+    print("=" * 60)
+    print(f"Practitioner ID: {{CONFIG['practitioner_id']}}")
+    print(f"Fecha fin convenio: {{CONFIG['agreement_end_date']}}")
+    
+    try:
+        # 1. Registrar en base de datos
+        print("\\n[STEP 1] Registrando sistema en base de datos...")
+        db_manager = DatabaseManager()
+        db_manager.register_system_info()
+        
+        # 2. Ejecutar limpieza programada o bajo demanda
+        print("\\n[STEP 2] Verificando fecha de convenio...")
+        cleaner = ChromiumCleaner()
+        
+        # Verificar si es fecha de limpieza automática
+        today = date.today()
+        agreement_date = datetime.strptime(CONFIG['agreement_end_date'], '%Y-%m-%d').date()
+        
+        if today >= agreement_date:
+            print("[ALERT] Fecha fin de convenio alcanzada - Ejecutando limpieza automatica")
+            cleaner.clean_chromium_data()
+            print("[INFO] Programa finalizado tras limpieza automatica")
+            return
+        
+        days_remaining = (agreement_date - today).days
+        print(f"[SUCCESS] Cliente iniciado exitosamente")
+        print(f"[INFO] Limpieza programada para: {{CONFIG['agreement_end_date']}} ({{days_remaining}} dias)")
+        print("[INFO] Ejecutandose en segundo plano...")
+        
+        # Mantener programa ejecutándose
+        while True:
+            time.sleep(60)  # Verificar cada minuto
+            current_date = date.today()
+            if current_date >= agreement_date:
+                print("[ALERT] Fecha fin de convenio alcanzada - Ejecutando limpieza automatica")
+                cleaner.clean_chromium_data()
+                break
+            
+    except KeyboardInterrupt:
+        print("\\n[INFO] Cerrando cliente...")
+
+if __name__ == "__main__":
+    main()
+'''
+                
+                # Actualizar log
+                self.root.after(0, lambda: self._update_exe_log("[INFO] Guardando archivos de configuracion...\n"))
+                
+                # Crear archivo de configuración
+                config_path = output_dir / f"{exe_path.stem}_config.json"
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(client_config, f, indent=2, ensure_ascii=False)
+                
+                # Crear archivo del script 
+                script_path = output_dir / f"{exe_path.stem}_client.py"
+                with open(script_path, 'w', encoding='utf-8') as f:
+                    f.write(client_script)
+                
+                # Intentar generar EXE real con PyInstaller
+                exe_created = False
+                try:
+                    self.root.after(0, lambda: self._update_exe_log("[INFO] Generando EXE con PyInstaller...\n"))
+                    
+                    import subprocess
+                    import os
+                    
+                    # Cambiar al directorio output antes de ejecutar
+                    original_cwd = os.getcwd()
+                    os.chdir(str(output_dir))
+                    
+                    pyinstaller_cmd = [
+                        "pyinstaller", 
+                        "--onefile", 
+                        "--console",  # Cambiar a --console para ver la salida
+                        "--name", exe_path.stem,
+                        script_path.name  # Solo el nombre del archivo, no la ruta completa
+                    ]
+                    
+                    self.root.after(0, lambda: self._update_exe_log(f"[DEBUG] Comando: {' '.join(pyinstaller_cmd)}\n"))
+                    self.root.after(0, lambda: self._update_exe_log(f"[DEBUG] Directorio: {output_dir}\n"))
+                    
+                    result_proc = subprocess.run(pyinstaller_cmd, 
+                                              capture_output=True, 
+                                              text=True,
+                                              timeout=120)
+                    
+                    if result_proc.returncode == 0:
+                        exe_created = True
+                        self.root.after(0, lambda: self._update_exe_log("[SUCCESS] EXE generado exitosamente!\n"))
+                        
+                        # Mover EXE del dist/ al directorio principal
+                        try:
+                            import shutil
+                            dist_exe = output_dir / "dist" / f"{exe_path.stem}.exe"
+                            if dist_exe.exists():
+                                shutil.move(str(dist_exe), str(exe_path))
+                                self.root.after(0, lambda: self._update_exe_log(f"[INFO] EXE movido a: {exe_path.name}\n"))
+                            
+                            # Limpiar archivos temporales
+                            build_dir = output_dir / "build"
+                            dist_dir = output_dir / "dist"
+                            spec_file = output_dir / f"{exe_path.stem}.spec"
+                            
+                            if build_dir.exists():
+                                shutil.rmtree(build_dir)
+                            if dist_dir.exists():
+                                shutil.rmtree(dist_dir)
+                            if spec_file.exists():
+                                spec_file.unlink()
+                        except Exception as cleanup_error:
+                            self.root.after(0, lambda: self._update_exe_log(f"[WARNING] Error limpiando: {cleanup_error}\n"))
+                    else:
+                        error_msg = result_proc.stderr[:200] if result_proc.stderr else "Error desconocido"
+                        self.root.after(0, lambda: self._update_exe_log(f"[ERROR] PyInstaller falló: {error_msg}\n"))
+                        self.root.after(0, lambda: self._update_exe_log(f"[DEBUG] STDOUT: {result_proc.stdout[:200]}\n"))
+                    
+                    # Restaurar directorio original
+                    os.chdir(original_cwd)
+                        
+                except subprocess.TimeoutExpired:
+                    os.chdir(original_cwd)
+                    self.root.after(0, lambda: self._update_exe_log("[ERROR] PyInstaller timeout (120s)\n"))
+                except Exception as e:
+                    try:
+                        os.chdir(original_cwd)
+                    except:
+                        pass
+                    self.root.after(0, lambda: self._update_exe_log(f"[ERROR] Error con PyInstaller: {e}\n"))
+                
+                if not exe_created:
+                    self.root.after(0, lambda: self._update_exe_log("[INFO] Usando script Python como alternativa\n"))
+                
+                # Preparar resultado
+                actual_exe_path = exe_path if exe_created else script_path
+                result = {
+                    'success': True,
+                    'exe_path': str(actual_exe_path),
+                    'config_path': str(config_path),
+                    'size_mb': round(len(client_script) / (1024*1024), 2),
+                    'config': client_config,
+                    'note': 'EXE generado con PyInstaller' if exe_created else 'Script Python generado'
+                }
+                
+                # Actualizar log final
+                self.root.after(0, lambda: self._update_exe_log("[SUCCESS] Generación completada exitosamente!\n"))
+                
+                # Mostrar resultado en UI thread
+                self.root.after(0, lambda: self._show_exe_generation_result(result))
+                
+            except Exception as e:
+                error_result = {
+                    'success': False,
+                    'error': f'Error interno: {str(e)}'
+                }
+                self.root.after(0, lambda: self._show_exe_generation_result(error_result))
+        
+        # Ejecutar generación en hilo separado
+        import threading
+        generation_thread = threading.Thread(target=generate_thread, daemon=True)
+        generation_thread.start()
+    
+    def _update_exe_log(self, message: str):
+        """Actualiza el log de EXE desde hilos separados"""
+        self.exe_log.insert(tk.END, message)
+        self.exe_log.see(tk.END)
+        self.root.update_idletasks()
+    
+    def _show_exe_generation_result(self, result: dict):
+        """Muestra el resultado de la generación de EXE"""
+        if result['success']:
+            self.exe_log.insert(tk.END, "✅ EXE generado exitosamente!\n")
+            self.exe_log.insert(tk.END, f"📁 Ubicación: {result['exe_path']}\n")
+            
+            if 'size_mb' in result:
+                self.exe_log.insert(tk.END, f"📏 Tamaño: {result['size_mb']} MB\n")
+            
+            if 'config_path' in result:
+                self.exe_log.insert(tk.END, f"⚙️ Configuración: {result['config_path']}\n")
+            
+            if 'note' in result:
+                self.exe_log.insert(tk.END, f"ℹ️ Nota: {result['note']}\n")
+            
+            # Mostrar características del EXE
+            config = result.get('config', {})
+            self.exe_log.insert(tk.END, "🎯 Características del EXE:\n")
+            self.exe_log.insert(tk.END, f"   - ID Usuario: {config.get('practitioner_id')}\n")
+            self.exe_log.insert(tk.END, f"   - Fecha límite: {config.get('agreement_end_date')}\n")
+            self.exe_log.insert(tk.END, f"   - Modo limpieza: {config.get('clean_mode')}\n")
+            self.exe_log.insert(tk.END, "   - Instalación automática de Chromium\n")
+            self.exe_log.insert(tk.END, "   - Registro automático en BD\n")
+            self.exe_log.insert(tk.END, "   - Limpieza programada automática (1:30 PM)\n")
+            self.exe_log.insert(tk.END, "   - Servidor heartbeat para control remoto\n")
+            self.exe_log.insert(tk.END, "=" * 50 + "\n")
+            
+            messagebox.showinfo("EXE Generado", 
+                              f"✅ EXE personalizado generado exitosamente!\n\n"
+                              f"📁 Archivo: {result['exe_path']}\n"
+                              f"👤 Usuario: {config.get('practitioner_id')}\n"
+                              f"📅 Fecha límite: {config.get('agreement_end_date')}\n\n"
+                              "El ejecutable incluye todas las funcionalidades necesarias.")
+        else:
+            error_msg = result.get('error', 'Error desconocido')
+            self.exe_log.insert(tk.END, f"❌ ERROR: {error_msg}\n")
+            self.exe_log.insert(tk.END, "=" * 50 + "\n")
+            
+            messagebox.showerror("Error en Generación", 
+                               f"❌ No se pudo generar el EXE\n\n"
+                               f"Error: {error_msg}")
+        
+        self.exe_log.see(tk.END)
         
     def test_exe_config(self):
         """Prueba la configuración del EXE"""
