@@ -1,0 +1,37 @@
+{
+  "practitioner_id": 663,
+  "agreement_end_date": "2025-11-17",
+  "clean_mode": "profile",
+  "generated_at": "2025-10-16T20:52:12.757790",
+  "user_info": {
+    "general_id": 12345,
+    "status": "A",
+    "start_date": "2025-01-01"
+  },
+  "database": {
+    "host": "sql.freedb.tech",
+    "port": 3306,
+    "database": "freedb_test-bot-devconsulting",
+    "user": "freedb_practitioners",
+    "password": "eeg93*TtDH&qK!P"
+  },
+  "cleaner": {
+    "mode": "profile",
+    "files_to_remove": [
+      "Login Data",
+      "Cookies",
+      "Web Data",
+      "Local Storage"
+    ],
+    "quarantine_dir": "C:/browser-data-control/quarantine/user_663",
+    "chromium_url": "https://download-chromium.appspot.com/"
+  },
+  "scheduler": {
+    "cleanup_time": "13:30",
+    "check_interval": 3600
+  },
+  "heartbeat": {
+    "server_port": 8765,
+    "check_interval": 300
+  }
+}

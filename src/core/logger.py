@@ -21,3 +21,16 @@ def setup_logging(log_file: str = "logs/browser-data-control.log", level: str = 
         logger.addHandler(fh)
 
     return logger
+
+
+def get_logger(name: str = "browser_data_control"):
+    """
+    Obtiene el logger configurado o configura uno nuevo si no existe
+    """
+    logger = logging.getLogger(name)
+    
+    # Si el logger no está configurado, configurarlo con valores por defecto
+    if not logger.handlers:
+        return setup_logging()
+    
+    return logger
