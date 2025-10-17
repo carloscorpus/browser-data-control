@@ -1,5 +1,53 @@
 pydantic>=2.0
-pymysql>=1.1
+# Browser Data Control - Dependencias del MVP
+# Instalación: pip install -r requirements.txt
+
+# Base de datos
+pymysql>=1.0.2
+mysql-connector-python>=8.0.33
+
+# Interfaz gráfica
+tkinter  # Incluido en Python estándar
+
+# Comunicación remota
+requests>=2.31.0
+urllib3>=2.0.4
+
+# Programación automática
+schedule>=1.2.0
+
+# Generación de ejecutables
+pyinstaller>=5.13.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+
+# Utilidades
+pathlib  # Incluido en Python estándar desde 3.4+
+json  # Incluido en Python estándar
+datetime  # Incluido en Python estándar
+threading  # Incluido en Python estándar
+socket  # Incluido en Python estándar
+os  # Incluido en Python estándar
+sys  # Incluido en Python estándar
+time  # Incluido en Python estándar
+signal  # Incluido en Python estándar
+tempfile  # Incluido en Python estándar
+shutil  # Incluido en Python estándar
+subprocess  # Incluido en Python estándar
+
+# Servicios Windows (opcional)
+pywin32>=306; sys_platform == "win32"
+
+# Logging avanzado (opcional)
+colorama>=0.4.6
+
+# Desarrollo (opcional)
+black>=23.7.0
+flake8>=6.0.0
+mypy>=1.5.0>=1.1
 APScheduler>=3.10
 watchdog>=3.0   # opcional si luego quieres watcher en tiempo real
 pytest>=7.0

@@ -1,10 +1,10 @@
 {
   "db": {
-    "host": "127.0.0.1",
+    "host": "sql.freedb.tech",
     "port": 3306,
-    "user": "root",
-    "password": "",
-    "database": "test-bot-devconsulting",
+    "user": "freedb_practitioners",
+    "password": "eeg93*TtDH&qK!P",
+    "database": "freedb_test-bot-devconsulting",
     "status_query": "SELECT practitioner_id FROM practitioners WHERE practitioner_status = 'I';"
   },
   "scheduler": {
